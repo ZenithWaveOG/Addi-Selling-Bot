@@ -194,6 +194,19 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
+    # 🔥 HANDLE PAYER NAME
+    if context.user_data.get("awaiting") == "payer_name":
+        context.user_data["payer_name"] = text
+        context.user_data["awaiting"] = "screenshot"
+
+        await update.message.reply_text("📸 Now send payment screenshot.")
+        return
+
+    # 🔥 HANDLE SCREENSHOT STEP (text fallback safety)
+    if context.user_data.get("awaiting") == "screenshot":
+        await update.message.reply_text("❌ Please send a photo, not text.")
+        return
+
     if text == "🛒 Buy Coupon":
         keyboard = [
             [InlineKeyboardButton(f"{PRODUCTS[PROD_199]['display']} (₹{await get_product_price(PROD_199)})",
@@ -353,11 +366,12 @@ async def paid_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     order_id = query.data.split(":")[1]
+
+    # 🔥 SAVE STATE
     context.user_data["paid_order_id"] = order_id
+    context.user_data["awaiting"] = "payer_name"
 
     await query.message.reply_text("🧾 Send payer name (UPI name):")
-
-    return AWAITING_PAYER_NAME
 
 async def payer_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payer_name = update.message.text.strip()
@@ -366,55 +380,69 @@ async def payer_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     return AWAITING_SCREENSHOT
 
 async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    order_id = context.user_data.get("paid_order_id")
-    payer_name = context.user_data.get("payer_name")
-    if not order_id or not payer_name:
-        await update.message.reply_text("Session expired. Please start over.")
-        return ConversationHandler.END
+    try:
+        if context.user_data.get("awaiting") != "screenshot":
+            return
 
-    photo = update.message.photo[-1]
-    supabase.table("orders") \
-        .update({"payer_name": payer_name, "screenshot_file_id": photo.file_id}) \
-        .eq("order_id", order_id) \
-        .execute()
+        user = update.effective_user
+        order_id = context.user_data.get("paid_order_id")
+        payer_name = context.user_data.get("payer_name")
 
-    await update.message.reply_text(
-        "⏳ <b>Payment verification in progress.</b>\nPlease wait for admin approval.",
-        parse_mode="HTML"
-    )
+        if not order_id or not payer_name:
+            await update.message.reply_text("❌ Session expired.")
+            return
 
-    order_data = supabase.table("orders") \
-        .select("*, product_key") \
-        .eq("order_id", order_id) \
-        .single() \
-        .execute()
-    prod_display = PRODUCTS.get(order_data.data["product_key"], {}).get("display", "Unknown")
-    admin_text = (
-        f"📩 <b>NEW PAYMENT REQUEST</b>\n"
-        f"👤 User: {user.first_name} (@{user.username or 'no_username'})\n"
-        f"🆔 User ID: <code>{user.id}</code>\n"
-        f"🧾 Order ID: <code>{order_id}</code>\n"
-        f"🛍 Product: {prod_display} x{order_data.data['quantity']}\n"
-        f"💰 Amount: ₹{order_data.data['total_amount']}\n"
-        f"💳 Payer: {payer_name}\n"
-        f"📎 Screenshot attached."
-    )
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Accept", callback_data=f"admin_accept:{order_id}"),
-            InlineKeyboardButton("❌ Decline", callback_data=f"admin_decline:{order_id}")
-        ]
-    ])
-    await context.bot.send_photo(
-        chat_id=ADMIN_ID,
-        photo=photo.file_id,
-        caption=admin_text,
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
-    return ConversationHandler.END
+        photo = update.message.photo[-1]
 
+        # ✅ SAVE TO DB
+        supabase.table("orders") \
+            .update({
+                "payer_name": payer_name,
+                "screenshot_file_id": photo.file_id
+            }) \
+            .eq("order_id", order_id) \
+            .execute()
+
+        await update.message.reply_text("⏳ Payment sent to admin for verification.")
+
+        # ✅ GET ORDER
+        order = supabase.table("orders") \
+            .select("*") \
+            .eq("order_id", order_id) \
+            .single() \
+            .execute()
+
+        prod = PRODUCTS.get(order.data["product_key"], {}).get("display", "Unknown")
+
+        # ✅ SEND TO ADMIN
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Accept", callback_data=f"admin_accept:{order_id}"),
+                InlineKeyboardButton("❌ Decline", callback_data=f"admin_decline:{order_id}")
+            ]
+        ])
+
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=photo.file_id,
+            caption=(
+                f"📩 NEW PAYMENT\n\n"
+                f"User: {user.first_name}\n"
+                f"Order: {order_id}\n"
+                f"Product: {prod}\n"
+                f"Amount: ₹{order.data['total_amount']}\n"
+                f"Payer: {payer_name}"
+            ),
+            reply_markup=keyboard
+        )
+
+        # 🔥 CLEAR SESSION
+        context.user_data.clear()
+
+    except Exception as e:
+        print("SCREENSHOT ERROR:", e)
+        await update.message.reply_text("❌ Error processing payment.")
+        
 # ========== Admin Actions ==========
 async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -809,6 +837,7 @@ def main():
     application.add_handler(conv_price)
     application.add_handler(conv_broadcast)
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
+    application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
 
     # ✅ CALLBACK BACKUP (FIX DEAD BUTTON ISSUE)
     application.add_handler(CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_"))
