@@ -188,9 +188,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 🔥 ADD THIS BLOCK
-    if context.user_data.get("admin_prod_key"):
-        return  # ignore menu while admin is in process
 
     text = update.message.text
     user_id = update.effective_user.id
