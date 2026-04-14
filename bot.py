@@ -15,13 +15,12 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
-# ========== CONFIGURATION (from environment) ==========
+# ========== CONFIGURATION ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8778422236"))
 
-# Required environment checks
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set")
 if not SUPABASE_URL or not SUPABASE_KEY:
@@ -29,7 +28,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 from supabase import create_client, Client
 
-# Product keys
 PROD_199 = "199_per_100"
 PROD_499 = "499_per_100"
 PRODUCTS = {
@@ -54,10 +52,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Global reference for application (used in broadcast)
 application = None
 
 # ========== Helper Functions ==========
@@ -91,7 +86,7 @@ async def broadcast_message(text: str):
             await application.bot.send_message(chat_id=user["user_id"], text=text)
             await asyncio.sleep(0.05)
         except Exception as e:
-            logger.error(f"Broadcast failed to {user['user_id']}: {e}")
+            logger.error(f"Broadcast failed: {e}")
 
 async def get_last_10_buyers() -> str:
     orders = supabase.table("orders") \
@@ -274,7 +269,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-# ========== Buy Flow (Conversation) ==========
+# ========== Buy Flow ==========
 async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -472,7 +467,7 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await query.edit_message_caption(f"❌ Order {order_id} declined.")
 
-# ========== Admin Panel Conversation Handlers ==========
+# ========== Admin Panel Handlers (Fixed) ==========
 async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -651,24 +646,18 @@ async def admin_last10(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = await get_last_10_buyers()
     await query.edit_message_text(f"<b>Last 10 Buyers</b>\n\n{report}", parse_mode="HTML")
 
-# ========== Main & Webhook ==========
+# ========== Main ==========
 def main():
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # User conversation: buy flow
+    # Conversation handlers
     conv_buy = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_callback, pattern="^buy:")],
-        states={
-            AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)],
-        },
+        states={AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)]},
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
-    # Paid flow
     conv_paid = ConversationHandler(
         entry_points=[CallbackQueryHandler(paid_callback, pattern="^paid:")],
         states={
@@ -676,12 +665,8 @@ def main():
             AWAITING_SCREENSHOT: [MessageHandler(filters.PHOTO, screenshot_received)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
-    # Admin: add coupon
     conv_add = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_coupon_start, pattern="^admin_add_coupon$")],
         states={
@@ -689,12 +674,8 @@ def main():
             ADMIN_ADD_COUPON_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
-    # Admin: remove coupon
     conv_remove = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_remove_coupon_start, pattern="^admin_remove_coupon$")],
         states={
@@ -702,12 +683,8 @@ def main():
             ADMIN_REMOVE_COUPON_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
-    # Admin: change price
     conv_price = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_change_price_start, pattern="^admin_change_price$")],
         states={
@@ -715,22 +692,13 @@ def main():
             ADMIN_CHANGE_PRICE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
-    # Admin: broadcast
     conv_broadcast = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
-        states={
-            ADMIN_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)],
-        },
+        states={ADMIN_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)]},
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-        per_chat=True,
-        per_user=True,
-        allow_reentry=True,
+        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
     )
 
     application.add_handler(CommandHandler("start", start))
@@ -747,7 +715,6 @@ def main():
     application.add_handler(CallbackQueryHandler(admin_last10, pattern="^admin_last10$"))
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
 
-    # Webhook mode
     port = int(os.environ.get("PORT", 8443))
     webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
     if webhook_url:
