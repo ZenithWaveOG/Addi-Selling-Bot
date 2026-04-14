@@ -471,12 +471,18 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    logger.info("Admin add coupon start")
+
     keyboard = [
-        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'], callback_data="add_coupon_prod_199")],
-        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'], callback_data="add_coupon_prod_499")]
+        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'],
+         callback_data=f"add_coupon_prod_{PROD_199}")],
+        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'],
+         callback_data=f"add_coupon_prod_{PROD_499}")]
     ]
-    await query.edit_message_text("Select product to add coupons:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    await query.edit_message_text(
+        "Select product to add coupons:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ADMIN_ADD_COUPON_PRODUCT
 
 async def admin_add_coupon_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -522,11 +528,18 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
 async def admin_remove_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     keyboard = [
-        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'], callback_data="remove_coupon_prod_199")],
-        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'], callback_data="remove_coupon_prod_499")]
+        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'],
+         callback_data=f"remove_coupon_prod_{PROD_199}")],
+        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'],
+         callback_data=f"remove_coupon_prod_{PROD_499}")]
     ]
-    await query.edit_message_text("Select product to remove coupons from:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    await query.edit_message_text(
+        "Select product to remove coupons:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ADMIN_REMOVE_COUPON_PRODUCT
 
 async def admin_remove_coupon_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -578,11 +591,18 @@ async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAU
 async def admin_change_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     keyboard = [
-        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'], callback_data="chprice_prod_199")],
-        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'], callback_data="chprice_prod_499")]
+        [InlineKeyboardButton(PRODUCTS[PROD_199]['display'],
+         callback_data=f"chprice_prod_{PROD_199}")],
+        [InlineKeyboardButton(PRODUCTS[PROD_499]['display'],
+         callback_data=f"chprice_prod_{PROD_499}")]
     ]
-    await query.edit_message_text("Select product to change price:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    await query.edit_message_text(
+        "Select product to change price:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ADMIN_CHANGE_PRICE_PRODUCT
 
 async def admin_change_price_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -651,13 +671,17 @@ def main():
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Conversation handlers
+    # ===== CONVERSATIONS =====
     conv_buy = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_callback, pattern="^buy:")],
-        states={AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)]},
+        states={
+            AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)]
+        },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
+        allow_reentry=True,
+        block=False
     )
+
     conv_paid = ConversationHandler(
         entry_points=[CallbackQueryHandler(paid_callback, pattern="^paid:")],
         states={
@@ -665,44 +689,70 @@ def main():
             AWAITING_SCREENSHOT: [MessageHandler(filters.PHOTO, screenshot_received)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
+        allow_reentry=True,
+        block=False
     )
+
     conv_add = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_coupon_start, pattern="^admin_add_coupon$")],
         states={
-            ADMIN_ADD_COUPON_PRODUCT: [CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_")],
-            ADMIN_ADD_COUPON_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)],
+            ADMIN_ADD_COUPON_PRODUCT: [
+                CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_")
+            ],
+            ADMIN_ADD_COUPON_CODES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)
+            ],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
+        allow_reentry=True,
+        block=False
     )
+
     conv_remove = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_remove_coupon_start, pattern="^admin_remove_coupon$")],
         states={
-            ADMIN_REMOVE_COUPON_PRODUCT: [CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_")],
-            ADMIN_REMOVE_COUPON_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)],
+            ADMIN_REMOVE_COUPON_PRODUCT: [
+                CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_")
+            ],
+            ADMIN_REMOVE_COUPON_NUMBER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)
+            ],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
+        allow_reentry=True,
+        block=False
     )
+
     conv_price = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_change_price_start, pattern="^admin_change_price$")],
         states={
-            ADMIN_CHANGE_PRICE_PRODUCT: [CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_")],
-            ADMIN_CHANGE_PRICE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)],
+            ADMIN_CHANGE_PRICE_PRODUCT: [
+                CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_")
+            ],
+            ADMIN_CHANGE_PRICE_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)
+            ],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
-    )
-    conv_broadcast = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
-        states={ADMIN_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)]},
-        fallbacks=[CommandHandler("start", start)],
-        per_message=False, per_chat=True, per_user=True, allow_reentry=True,
+        allow_reentry=True,
+        block=False
     )
 
+    conv_broadcast = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
+        states={
+            ADMIN_BROADCAST_MESSAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)
+            ]
+        },
+        fallbacks=[CommandHandler("start", start)],
+        allow_reentry=True,
+        block=False
+    )
+
+    # ===== HANDLERS ORDER (CRITICAL FIX) =====
     application.add_handler(CommandHandler("start", start))
-    
+
     application.add_handler(conv_buy)
     application.add_handler(conv_paid)
     application.add_handler(conv_add)
@@ -710,24 +760,22 @@ def main():
     application.add_handler(conv_price)
     application.add_handler(conv_broadcast)
 
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+    # ✅ CALLBACK BACKUP (FIX DEAD BUTTON ISSUE)
+    application.add_handler(CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_"))
+    application.add_handler(CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_"))
+    application.add_handler(CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_"))
+
     application.add_handler(CallbackQueryHandler(admin_accept, pattern="^admin_accept:"))
     application.add_handler(CallbackQueryHandler(admin_decline, pattern="^admin_decline:"))
     application.add_handler(CallbackQueryHandler(admin_update_qr, pattern="^admin_update_qr$"))
     application.add_handler(CallbackQueryHandler(admin_last10, pattern="^admin_last10$"))
+
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
 
-    port = int(os.environ.get("PORT", 8443))
-    webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if webhook_url:
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=BOT_TOKEN,
-            webhook_url=f"{webhook_url}/{BOT_TOKEN}"
-        )
-    else:
-        application.run_polling()
+    # ✅ KEEP THIS LAST
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
