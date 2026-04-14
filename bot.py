@@ -445,48 +445,77 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         
 # ========== Admin Actions ==========
 async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    order_id = query.data.split(":")[1]
+    try:
+        query = update.callback_query
+        await query.answer()
 
-    order = supabase.table("orders").select("*").eq("order_id", order_id).single().execute()
-    if not order.data:
-        await query.edit_message_caption("Order not found.")
-        return
+        order_id = query.data.split(":")[1]
 
-    if order.data["status"] != "pending":
-        await query.edit_message_caption(f"Order already {order.data['status']}.")
-        return
+        order = supabase.table("orders") \
+            .select("*") \
+            .eq("order_id", order_id) \
+            .single() \
+            .execute()
 
-    product_key = order.data["product_key"]
-    quantity = order.data["quantity"]
-    user_id = order.data["user_id"]
+        if not order.data:
+            await query.edit_message_caption("❌ Order not found.")
+            return
 
-    stock = await get_stock(product_key)
-    if stock < quantity:
-        await query.edit_message_caption(
-            f"❌ Stock changed! Only {stock} left, but user requested {quantity}. Decline automatically."
-        )
-        supabase.table("orders").update({"status": "declined"}).eq("order_id", order_id).execute()
+        if order.data["status"] != "pending":
+            await query.edit_message_caption(f"⚠️ Already {order.data['status']}")
+            return
+
+        product_key = order.data["product_key"]
+        quantity = order.data["quantity"]
+        user_id = order.data["user_id"]
+
+        # ✅ CHECK STOCK
+        stock = await get_stock(product_key)
+
+        if stock < quantity:
+            await query.edit_message_caption("❌ Not enough stock.")
+            return
+
+        # ✅ GET CODES
+        codes_res = supabase.table("coupon_codes") \
+            .select("id, code") \
+            .eq("product_key", product_key) \
+            .eq("is_used", False) \
+            .limit(quantity) \
+            .execute()
+
+        if len(codes_res.data) < quantity:
+            await query.edit_message_caption("❌ Not enough coupons available.")
+            return
+
+        codes = [c["code"] for c in codes_res.data]
+        ids = [c["id"] for c in codes_res.data]
+
+        # ✅ MARK USED
+        supabase.table("coupon_codes") \
+            .update({"is_used": True, "order_id": order_id}) \
+            .in_("id", ids) \
+            .execute()
+
+        # ✅ SEND TO USER
+        codes_text = "\n".join(codes)
+
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ Your order was declined because the required stock is no longer available."
+            text=f"✅ Payment Approved!\n\nYour Codes:\n{codes_text}"
         )
-        return
 
-    success = await send_coupon_codes(user_id, order_id, product_key, quantity)
-    if not success:
-        await query.edit_message_caption("❌ Error: Could not fetch coupons (stock mismatch).")
-        supabase.table("orders").update({"status": "declined"}).eq("order_id", order_id).execute()
-        return
+        # ✅ UPDATE ORDER
+        supabase.table("orders") \
+            .update({"status": "completed"}) \
+            .eq("order_id", order_id) \
+            .execute()
 
-    supabase.table("orders") \
-        .update({"status": "completed", "approved_at": datetime.now().isoformat()}) \
-        .eq("order_id", order_id) \
-        .execute()
+        await query.edit_message_caption(f"✅ Order {order_id} approved")
 
-    await query.edit_message_caption(f"✅ Order {order_id} approved and coupons sent.")
-    await context.bot.send_message(chat_id=user_id, text="✅ Your order has been approved! Check your coupons above.")
+    except Exception as e:
+        print("ACCEPT ERROR:", e)
+        await query.edit_message_caption("❌ Error while approving order.")
 
 async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
