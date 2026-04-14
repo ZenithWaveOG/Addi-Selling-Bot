@@ -4,24 +4,30 @@ import random
 import string
 import asyncio
 from datetime import datetime
-from io import BytesIO
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, ReplyKeyboardRemove
+    ReplyKeyboardMarkup
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
-from supabase import create_client, Client
 
 # ========== CONFIGURATION (from environment) ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8778422236"))
+
+# Required environment checks
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+
+from supabase import create_client, Client
 
 # Product keys
 PROD_199 = "199_per_100"
@@ -31,7 +37,6 @@ PRODUCTS = {
     PROD_499: {"display": "499 per 100 off", "default_price": 499},
 }
 
-# Channels
 CHANNEL_1 = "https://t.me/VIPAMMER"
 CHANNEL_2 = "https://t.me/addiloots"
 SUPPORT_BOT = "@ADDISUPPORT_BOT"
@@ -49,16 +54,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Supabase client
+# Initialize Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Global reference for application (used in broadcast)
+application = None
 
 # ========== Helper Functions ==========
 def generate_order_id() -> str:
-    """Generate unique order ID: MNT-XXXXXX"""
     return "MNT-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 async def get_stock(product_key: str) -> int:
-    """Return number of unused coupons for a product."""
     result = supabase.table("coupon_codes") \
         .select("id", count="exact") \
         .eq("product_key", product_key) \
@@ -67,33 +73,27 @@ async def get_stock(product_key: str) -> int:
     return result.count
 
 async def get_payment_qr() -> Optional[str]:
-    """Get current payment QR file_id from bot_config."""
     res = supabase.table("bot_config") \
         .select("value") \
         .eq("key", "payment_qr_file_id") \
         .execute()
-    if res.data:
-        return res.data[0]["value"]
-    return None
+    return res.data[0]["value"] if res.data else None
 
 async def update_payment_qr(file_id: str):
-    """Set new payment QR file_id."""
     supabase.table("bot_config") \
         .upsert({"key": "payment_qr_file_id", "value": file_id}) \
         .execute()
 
 async def broadcast_message(text: str):
-    """Send a message to all users who started the bot."""
     users = supabase.table("users").select("user_id").execute()
     for user in users.data:
         try:
             await application.bot.send_message(chat_id=user["user_id"], text=text)
-            await asyncio.sleep(0.05)  # avoid flooding
+            await asyncio.sleep(0.05)
         except Exception as e:
             logger.error(f"Broadcast failed to {user['user_id']}: {e}")
 
 async def get_last_10_buyers() -> str:
-    """Return formatted string of last 10 completed orders."""
     orders = supabase.table("orders") \
         .select("user_id, product_key, quantity, total_amount, created_at, payer_name") \
         .eq("status", "completed") \
@@ -118,7 +118,6 @@ async def get_last_10_buyers() -> str:
     return "\n".join(lines)
 
 async def register_user(user_id: int, username: str, first_name: str):
-    """Insert user if not exists."""
     existing = supabase.table("users").select("user_id").eq("user_id", user_id).execute()
     if not existing.data:
         supabase.table("users").insert({
@@ -129,12 +128,6 @@ async def register_user(user_id: int, username: str, first_name: str):
         }).execute()
 
 async def send_coupon_codes(user_id: int, order_id: str, product_key: str, quantity: int) -> bool:
-    """
-    Atomically fetch `quantity` unused coupon codes for product_key,
-    mark them as used with order_id, and send them to user.
-    Returns True if successful, False if insufficient stock.
-    """
-    # Get available codes (oldest first)
     codes_res = supabase.table("coupon_codes") \
         .select("id, code") \
         .eq("product_key", product_key) \
@@ -144,17 +137,12 @@ async def send_coupon_codes(user_id: int, order_id: str, product_key: str, quant
         .execute()
     if len(codes_res.data) < quantity:
         return False
-
     code_ids = [c["id"] for c in codes_res.data]
     code_strings = [c["code"] for c in codes_res.data]
-
-    # Mark as used
     supabase.table("coupon_codes") \
         .update({"is_used": True, "order_id": order_id}) \
         .in_("id", code_ids) \
         .execute()
-
-    # Send codes to user
     codes_text = "\n".join([f"<code>{c}</code>" for c in code_strings])
     msg = (
         "<b>✅ PAYMENT APPROVED ✅</b>\n"
@@ -165,6 +153,20 @@ async def send_coupon_codes(user_id: int, order_id: str, product_key: str, quant
     )
     await application.bot.send_message(chat_id=user_id, text=msg, parse_mode="HTML")
     return True
+
+async def get_product_price(product_key: str) -> int:
+    res = supabase.table("bot_config") \
+        .select("value") \
+        .eq("key", f"price_{product_key}") \
+        .execute()
+    if res.data:
+        return int(res.data[0]["value"])
+    return PRODUCTS[product_key]["default_price"]
+
+async def set_product_price(product_key: str, price: int):
+    supabase.table("bot_config") \
+        .upsert({"key": f"price_{product_key}", "value": str(price)}) \
+        .execute()
 
 # ========== User Menu Handlers ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -204,7 +206,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Select A Coupon To Buy:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        return ConversationHandler.END
+        return
 
     elif text == "📊 Stock":
         stock1 = await get_stock(PROD_199)
@@ -229,7 +231,6 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ No completed orders found.")
             return
         for order in orders.data:
-            # fetch codes for this order
             codes_res = supabase.table("coupon_codes") \
                 .select("code") \
                 .eq("order_id", order["order_id"]) \
@@ -423,7 +424,6 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     order_id = query.data.split(":")[1]
 
-    # Get order details
     order = supabase.table("orders").select("*").eq("order_id", order_id).single().execute()
     if not order.data:
         await query.edit_message_caption("Order not found.")
@@ -437,7 +437,6 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quantity = order.data["quantity"]
     user_id = order.data["user_id"]
 
-    # Re-check stock before finalising
     stock = await get_stock(product_key)
     if stock < quantity:
         await query.edit_message_caption(
@@ -450,14 +449,12 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Send coupon codes
     success = await send_coupon_codes(user_id, order_id, product_key, quantity)
     if not success:
         await query.edit_message_caption("❌ Error: Could not fetch coupons (stock mismatch).")
         supabase.table("orders").update({"status": "declined"}).eq("order_id", order_id).execute()
         return
 
-    # Update order status
     supabase.table("orders") \
         .update({"status": "completed", "approved_at": datetime.now().isoformat()}) \
         .eq("order_id", order_id) \
@@ -472,7 +469,6 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = query.data.split(":")[1]
     supabase.table("orders").update({"status": "declined"}).eq("order_id", order_id).execute()
 
-    # Get user_id
     order = supabase.table("orders").select("user_id").eq("order_id", order_id).single().execute()
     if order.data:
         await context.bot.send_message(
@@ -482,20 +478,6 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_caption(f"❌ Order {order_id} declined.")
 
 # ========== Admin Panel Conversation Handlers ==========
-async def get_product_price(product_key: str) -> int:
-    res = supabase.table("bot_config") \
-        .select("value") \
-        .eq("key", f"price_{product_key}") \
-        .execute()
-    if res.data:
-        return int(res.data[0]["value"])
-    return PRODUCTS[product_key]["default_price"]
-
-async def set_product_price(product_key: str, price: int):
-    supabase.table("bot_config") \
-        .upsert({"key": f"price_{product_key}", "value": str(price)}) \
-        .execute()
-
 async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -530,7 +512,6 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("No valid codes found. Please send at least one code.")
         return ADMIN_ADD_COUPON_CODES
 
-    # Insert each code
     inserted = 0
     for code in codes:
         try:
@@ -587,7 +568,6 @@ async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text(f"Only {stock} coupons available. Cannot remove {num}.")
         return ADMIN_REMOVE_COUPON_NUMBER
 
-    # Fetch oldest unused codes
     codes_res = supabase.table("coupon_codes") \
         .select("id") \
         .eq("product_key", prod_key) \
@@ -646,7 +626,7 @@ async def admin_update_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("Please send the new payment QR code as a photo.")
-    return  # wait for photo
+    # No state change; we'll handle the photo separately
 
 async def admin_photo_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
