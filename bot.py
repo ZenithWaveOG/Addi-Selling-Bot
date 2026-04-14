@@ -352,9 +352,12 @@ async def quantity_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def paid_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     order_id = query.data.split(":")[1]
     context.user_data["paid_order_id"] = order_id
-    await query.edit_message_text("Please send the payer name (as per UPI):")
+
+    await query.message.reply_text("🧾 Send payer name (UPI name):")
+
     return AWAITING_PAYER_NAME
 
 async def payer_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -713,14 +716,20 @@ def main():
     )
 
     conv_paid = ConversationHandler(
-        entry_points=[CallbackQueryHandler(paid_callback, pattern="^paid:")],
+        entry_points=[],   # 🔥 empty
         states={
-            AWAITING_PAYER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, payer_name_received)],
-            AWAITING_SCREENSHOT: [MessageHandler(filters.PHOTO, screenshot_received)],
+            AWAITING_PAYER_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, payer_name_received)
+            ],
+            AWAITING_SCREENSHOT: [
+                MessageHandler(filters.PHOTO, screenshot_received)
+            ],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=True,
+        per_chat=True,
+        per_user=True,
         allow_reentry=True,
-        block=False
     )
 
     conv_add = ConversationHandler(
@@ -789,6 +798,7 @@ def main():
     application.add_handler(conv_remove)
     application.add_handler(conv_price)
     application.add_handler(conv_broadcast)
+    application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
 
     # ✅ CALLBACK BACKUP (FIX DEAD BUTTON ISSUE)
     application.add_handler(CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_"))
