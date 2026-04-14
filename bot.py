@@ -863,12 +863,6 @@ def main():
     
     application.add_handler(CommandHandler("start", start))
 
-    application.add_handler(conv_buy)
-    application.add_handler(conv_paid)
-    application.add_handler(conv_add)
-    application.add_handler(conv_remove)
-    application.add_handler(conv_price)
-    application.add_handler(conv_broadcast)
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
     application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
 
