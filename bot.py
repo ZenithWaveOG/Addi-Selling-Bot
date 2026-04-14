@@ -866,7 +866,7 @@ def main():
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
     application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
 
-    # ✅ CALLBACK BACKUP (FIX DEAD BUTTON ISSUE)
+    # CALLBACKS
     application.add_handler(CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_"))
     application.add_handler(CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_"))
     application.add_handler(CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_"))
@@ -878,11 +878,18 @@ def main():
 
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
 
-    # ✅ KEEP THIS LAST
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
 
-    # 🔥 THIS WAS MISSING
-    application.run_polling(drop_pending_updates=True)
+    # 🔥 WEBHOOK (PORT SETUP)
+    port = int(os.environ.get("PORT", 10000))
+    webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{webhook_url}/{BOT_TOKEN}"
+    )
 
 
 if __name__ == "__main__":
