@@ -666,6 +666,9 @@ def main():
             AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     # Paid flow
     conv_paid = ConversationHandler(
@@ -675,6 +678,9 @@ def main():
             AWAITING_SCREENSHOT: [MessageHandler(filters.PHOTO, screenshot_received)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     # Admin: add coupon
     conv_add = ConversationHandler(
@@ -684,6 +690,9 @@ def main():
             ADMIN_ADD_COUPON_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     # Admin: remove coupon
     conv_remove = ConversationHandler(
@@ -693,6 +702,9 @@ def main():
             ADMIN_REMOVE_COUPON_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     # Admin: change price
     conv_price = ConversationHandler(
@@ -702,6 +714,9 @@ def main():
             ADMIN_CHANGE_PRICE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     # Admin: broadcast
     conv_broadcast = ConversationHandler(
@@ -710,6 +725,9 @@ def main():
             ADMIN_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
 
     application.add_handler(CommandHandler("start", start))
