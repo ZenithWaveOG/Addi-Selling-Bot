@@ -499,31 +499,40 @@ async def admin_add_coupon_product(update: Update, context: ContextTypes.DEFAULT
     return ADMIN_ADD_COUPON_CODES
 
 async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prod_key = context.user_data.get("admin_prod_key")
-    if not prod_key:
-        await update.message.reply_text("Session expired. Start over from Admin Panel.")
+    try:
+        prod_key = context.user_data.get("admin_prod_key")
+        if not prod_key:
+            await update.message.reply_text("Session expired.")
+            return ConversationHandler.END
+
+        codes_text = update.message.text.strip()
+        codes = [line.strip() for line in codes_text.splitlines() if line.strip()]
+
+        if not codes:
+            await update.message.reply_text("No valid codes found.")
+            return ADMIN_ADD_COUPON_CODES
+
+        inserted = 0
+
+        for code in codes:
+            try:
+                supabase.table("coupon_codes").insert({
+                    "product_key": prod_key,
+                    "code": code,
+                    "is_used": False
+                }).execute()
+                inserted += 1
+            except Exception as e:
+                print("Insert error:", e)
+
+        await update.message.reply_text(f"✅ Added {inserted} coupon(s).")
+
         return ConversationHandler.END
 
-    codes_text = update.message.text.strip()
-    codes = [line.strip() for line in codes_text.splitlines() if line.strip()]
-    if not codes:
-        await update.message.reply_text("No valid codes found. Please send at least one code.")
-        return ADMIN_ADD_COUPON_CODES
-
-    inserted = 0
-    for code in codes:
-        try:
-            supabase.table("coupon_codes").insert({
-                "product_key": prod_key,
-                "code": code,
-                "is_used": False
-            }).execute()
-            inserted += 1
-        except Exception as e:
-            logger.error(f"Insert error: {e}")
-
-    await update.message.reply_text(f"✅ Added {inserted} coupon(s) to {PRODUCTS[prod_key]['display']}.")
-    return ConversationHandler.END
+    except Exception as e:
+        print("CRASH ERROR:", e)
+        await update.message.reply_text("❌ Error occurred. Try again.")
+        return ConversationHandler.END
 
 async def admin_remove_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
