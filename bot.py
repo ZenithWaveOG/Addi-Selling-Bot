@@ -884,7 +884,15 @@ def main():
     # ✅ KEEP THIS LAST
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
 
-    application.run_polling()
+port = int(os.environ.get("PORT", 10000))
+webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
+
+application.run_webhook(
+    listen="0.0.0.0",
+    port=port,
+    url_path=BOT_TOKEN,
+    webhook_url=f"{webhook_url}/{BOT_TOKEN}"
+)
 
 if __name__ == "__main__":
     main()
