@@ -857,7 +857,10 @@ def main():
         block=False
     )
 
-    # ===== HANDLERS ORDER (CRITICAL FIX) =====
+    # ===== HANDLERS ORDER (CRITICAL FIX) =====0
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
+    
     application.add_handler(CommandHandler("start", start))
 
     application.add_handler(conv_buy)
@@ -883,22 +886,6 @@ def main():
 
     # ✅ KEEP THIS LAST
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
-
-def main():
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    # add handlers...
-
-    port = int(os.environ.get("PORT", 10000))
-    webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
-
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{webhook_url}/{BOT_TOKEN}"
-    )
-
 
 if __name__ == "__main__":
     main()
