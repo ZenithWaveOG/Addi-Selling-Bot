@@ -187,6 +187,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, reply_markup=reply_markup)
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 🔥 ADD THIS BLOCK
+    if context.user_data.get("admin_prod_key"):
+        return  # ignore menu while admin is in process
+
     text = update.message.text
     user_id = update.effective_user.id
 
@@ -564,38 +569,54 @@ async def admin_remove_coupon_product(update: Update, context: ContextTypes.DEFA
     return ADMIN_REMOVE_COUPON_NUMBER
 
 async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prod_key = context.user_data.get("admin_prod_key")
-    if not prod_key:
-        await update.message.reply_text("Session expired.")
-        return ConversationHandler.END
-
     try:
+        prod_key = context.user_data.get("admin_prod_key")
+
+        if not prod_key:
+            await update.message.reply_text("❌ Session expired. Start again.")
+            return ConversationHandler.END
+
+        # 👇 DEBUG LOG
+        print("REMOVE INPUT RECEIVED:", update.message.text)
+
         num = int(update.message.text.strip())
+
         if num <= 0:
             raise ValueError
-    except ValueError:
-        await update.message.reply_text("Please send a positive integer.")
-        return ADMIN_REMOVE_COUPON_NUMBER
 
-    stock = await get_stock(prod_key)
-    if num > stock:
-        await update.message.reply_text(f"Only {stock} coupons available. Cannot remove {num}.")
-        return ADMIN_REMOVE_COUPON_NUMBER
+        stock = await get_stock(prod_key)
 
-    codes_res = supabase.table("coupon_codes") \
-        .select("id") \
-        .eq("product_key", prod_key) \
-        .eq("is_used", False) \
-        .order("id", asc=True) \
-        .limit(num) \
-        .execute()
-    ids_to_delete = [c["id"] for c in codes_res.data]
-    if ids_to_delete:
-        supabase.table("coupon_codes").delete().in_("id", ids_to_delete).execute()
-        await update.message.reply_text(f"✅ Removed {len(ids_to_delete)} coupon(s) from {PRODUCTS[prod_key]['display']}.")
-    else:
-        await update.message.reply_text("No coupons to remove.")
-    return ConversationHandler.END
+        if num > stock:
+            await update.message.reply_text(f"❌ Only {stock} available.")
+            return ADMIN_REMOVE_COUPON_NUMBER
+
+        codes_res = supabase.table("coupon_codes") \
+            .select("id") \
+            .eq("product_key", prod_key) \
+            .eq("is_used", False) \
+            .order("id", asc=True) \
+            .limit(num) \
+            .execute()
+
+        ids = [c["id"] for c in codes_res.data]
+
+        if not ids:
+            await update.message.reply_text("❌ No coupons found.")
+            return ConversationHandler.END
+
+        supabase.table("coupon_codes").delete().in_("id", ids).execute()
+
+        await update.message.reply_text(f"✅ Removed {len(ids)} coupons.")
+
+        # 🔥 CLEAR SESSION
+        context.user_data.pop("admin_prod_key", None)
+
+        return ConversationHandler.END
+
+    except Exception as e:
+        print("REMOVE ERROR:", e)
+        await update.message.reply_text("❌ Error occurred. Send valid number.")
+        return ADMIN_REMOVE_COUPON_NUMBER
 
 async def admin_change_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
