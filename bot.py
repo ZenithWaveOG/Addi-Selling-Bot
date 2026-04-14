@@ -42,11 +42,11 @@ CHANNEL_2 = "https://t.me/addiloots"
 SUPPORT_BOT = "@ADDISUPPORT_BOT"
 
 # Conversation states
-(SELECTING_PRODUCT, AWAITING_QUANTITY, AWAITING_PAYER_NAME,
- AWAITING_SCREENSHOT, ADMIN_ADD_COUPON_PRODUCT, ADMIN_ADD_COUPON_CODES,
+(AWAITING_QUANTITY, AWAITING_PAYER_NAME, AWAITING_SCREENSHOT,
+ ADMIN_ADD_COUPON_PRODUCT, ADMIN_ADD_COUPON_CODES,
  ADMIN_REMOVE_COUPON_PRODUCT, ADMIN_REMOVE_COUPON_NUMBER,
  ADMIN_CHANGE_PRICE_PRODUCT, ADMIN_CHANGE_PRICE_VALUE,
- ADMIN_BROADCAST_MESSAGE) = range(11)
+ ADMIN_BROADCAST_MESSAGE) = range(10)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -314,7 +314,6 @@ async def quantity_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = price * qty
     order_id = generate_order_id()
 
-    # Create pending order in DB
     supabase.table("orders").insert({
         "order_id": order_id,
         "user_id": user.id,
@@ -332,7 +331,6 @@ async def quantity_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "total": total
     }
 
-    # Show invoice with QR
     qr_file_id = await get_payment_qr()
     if not qr_file_id:
         await update.message.reply_text("⚠️ Payment QR not configured by admin. Please try later.")
@@ -374,19 +372,16 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     photo = update.message.photo[-1]
-    # Update order with payer name and screenshot
     supabase.table("orders") \
         .update({"payer_name": payer_name, "screenshot_file_id": photo.file_id}) \
         .eq("order_id", order_id) \
         .execute()
 
-    # Notify user
     await update.message.reply_text(
         "⏳ <b>Payment verification in progress.</b>\nPlease wait for admin approval.",
         parse_mode="HTML"
     )
 
-    # Forward to admin
     order_data = supabase.table("orders") \
         .select("*, product_key") \
         .eq("order_id", order_id) \
@@ -481,6 +476,7 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info("Admin add coupon start")
     keyboard = [
         [InlineKeyboardButton(PRODUCTS[PROD_199]['display'], callback_data="add_coupon_prod_199")],
         [InlineKeyboardButton(PRODUCTS[PROD_499]['display'], callback_data="add_coupon_prod_499")]
@@ -491,6 +487,7 @@ async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_T
 async def admin_add_coupon_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"Admin add coupon product callback: {query.data}")
     prod_key = query.data.replace("add_coupon_prod_", "")
     context.user_data["admin_prod_key"] = prod_key
     await query.edit_message_text(
@@ -626,7 +623,6 @@ async def admin_update_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("Please send the new payment QR code as a photo.")
-    # No state change; we'll handle the photo separately
 
 async def admin_photo_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -647,6 +643,7 @@ async def admin_broadcast_message(update: Update, context: ContextTypes.DEFAULT_
     text = update.message.text
     await broadcast_message(text)
     await update.message.reply_text("✅ Broadcast sent to all users.")
+    return ConversationHandler.END
 
 async def admin_last10(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -669,6 +666,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
     # Paid flow
     conv_paid = ConversationHandler(
@@ -681,6 +679,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
     # Admin: add coupon
     conv_add = ConversationHandler(
@@ -693,6 +692,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
     # Admin: remove coupon
     conv_remove = ConversationHandler(
@@ -705,6 +705,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
     # Admin: change price
     conv_price = ConversationHandler(
@@ -717,6 +718,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
     # Admin: broadcast
     conv_broadcast = ConversationHandler(
@@ -728,6 +730,7 @@ def main():
         per_message=False,
         per_chat=True,
         per_user=True,
+        allow_reentry=True,
     )
 
     application.add_handler(CommandHandler("start", start))
@@ -755,7 +758,6 @@ def main():
             webhook_url=f"{webhook_url}/{BOT_TOKEN}"
         )
     else:
-        # Fallback to polling (for local testing)
         application.run_polling()
 
 if __name__ == "__main__":
