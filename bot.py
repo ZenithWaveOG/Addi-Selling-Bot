@@ -146,7 +146,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await register_user(user.id, user.username, user.first_name)
-    context.user_data.clear()  # fresh start
+    context.user_data.clear()
 
     keyboard = [
         ["🛒 Buy Coupon", "📊 Stock"],
@@ -179,11 +179,6 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["payer_name"] = text
         context.user_data["awaiting"] = "screenshot"
         await update.message.reply_text("📸 Now send payment screenshot.")
-        return
-
-    # HANDLE SCREENSHOT STEP (text fallback safety)
-    if context.user_data.get("awaiting") == "screenshot":
-        await update.message.reply_text("❌ Please send a photo, not text.")
         return
 
     if text == "🛒 Buy Coupon":
@@ -305,7 +300,6 @@ async def quantity_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = price * qty
     order_id = generate_order_id()
 
-    # Insert order
     try:
         supabase.table("orders").insert({
             "order_id": order_id,
@@ -366,11 +360,21 @@ async def payer_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Now please send the payment screenshot (photo).")
     return AWAITING_SCREENSHOT
 
-async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if context.user_data.get("awaiting") != "screenshot":
-            return
+# ========== Single Photo Handler (solves conflict) ==========
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # Case 1: Waiting for payment screenshot
+    if context.user_data.get("awaiting") == "screenshot":
+        await process_payment_screenshot(update, context)
+    # Case 2: Admin requested QR update
+    elif user_id == ADMIN_ID and context.user_data.get("awaiting_qr"):
+        await process_qr_update(update, context)
+    else:
+        # Ignore any other photo
+        await update.message.reply_text("❌ I wasn't expecting a photo right now. Use /start if you need help.")
 
+async def process_payment_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
         user = update.effective_user
         order_id = context.user_data.get("paid_order_id")
         payer_name = context.user_data.get("payer_name")
@@ -432,6 +436,13 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ Error processing payment.")
         context.user_data.clear()
 
+async def process_qr_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    await update_payment_qr(photo.file_id)
+    await update.message.reply_text("✅ Payment QR code updated successfully!")
+    # Clear the flag
+    context.user_data.pop("awaiting_qr", None)
+
 # ========== Admin Actions ==========
 async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -458,13 +469,11 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quantity = order.data["quantity"]
         user_id = order.data["user_id"]
 
-        # Check stock
         stock = await get_stock(product_key)
         if stock < quantity:
             await query.edit_message_caption("❌ Not enough stock.")
             return
 
-        # Get codes
         codes_res = supabase.table("coupon_codes") \
             .select("id, code") \
             .eq("product_key", product_key) \
@@ -479,20 +488,17 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         codes = [c["code"] for c in codes_res.data]
         ids = [c["id"] for c in codes_res.data]
 
-        # Mark used
         supabase.table("coupon_codes") \
             .update({"is_used": True, "order_id": order_id}) \
             .in_("id", ids) \
             .execute()
 
-        # Send to user
         codes_text = "\n".join(codes)
         await context.bot.send_message(
             chat_id=user_id,
             text=f"✅ Payment Approved!\n\nYour Codes:\n{codes_text}"
         )
 
-        # Update order
         supabase.table("orders") \
             .update({"status": "completed"}) \
             .eq("order_id", order_id) \
@@ -574,9 +580,7 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
             except Exception as e:
                 logger.error(f"Insert error: {e}")
 
-        # Clear admin key so menu works again
         context.user_data.pop("admin_prod_key", None)
-
         await update.message.reply_text(f"✅ Added {inserted} coupon(s).")
         return ConversationHandler.END
 
@@ -699,24 +703,16 @@ async def admin_change_price_value(update: Update, context: ContextTypes.DEFAULT
         return ADMIN_CHANGE_PRICE_VALUE
 
     await set_product_price(prod_key, new_price)
-    context.user_data.pop("admin_prod_key", None)  # Clear key
+    context.user_data.pop("admin_prod_key", None)
     await update.message.reply_text(f"✅ Price for {PRODUCTS[prod_key]['display']} updated to ₹{new_price}.")
     return ConversationHandler.END
 
 async def admin_update_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # Set a flag so the photo handler knows this is a QR update
+    context.user_data["awaiting_qr"] = True
     await query.edit_message_text("Please send the new payment QR code as a photo.")
-
-async def admin_photo_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    # If user is in the middle of a payment flow, ignore QR update
-    if context.user_data.get("awaiting") == "screenshot":
-        return
-    photo = update.message.photo[-1]
-    await update_payment_qr(photo.file_id)
-    await update.message.reply_text("✅ Payment QR code updated successfully!")
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -788,7 +784,7 @@ def main():
         allow_reentry=True,
     )
 
-    # ===== ORDER OF HANDLERS (CRITICAL) =====
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
@@ -797,23 +793,19 @@ def main():
     application.add_handler(CallbackQueryHandler(admin_update_qr, pattern="^admin_update_qr$"))
     application.add_handler(CallbackQueryHandler(admin_last10, pattern="^admin_last10$"))
 
-    # Conversation handlers
     application.add_handler(buy_handler)
     application.add_handler(add_handler)
     application.add_handler(remove_handler)
     application.add_handler(price_handler)
     application.add_handler(broadcast_handler)
 
-    # 🔥 Photo handler for payment screenshots MUST come before admin QR handler
-    application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
-
-    # Admin QR update handler (only if not in payment flow)
-    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
+    # Single photo handler (covers both payment screenshots and QR updates)
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Generic text menu handler (must be last)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
 
-    # Webhook setup for Render
+    # Webhook setup
     port = int(os.environ.get("PORT", 10000))
     webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
     application.run_webhook(
