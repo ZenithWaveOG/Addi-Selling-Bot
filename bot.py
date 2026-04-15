@@ -187,22 +187,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, reply_markup=reply_markup)
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 🔥 Prevent menu interference during admin actions
+    # Prevent menu interference during admin actions
     if context.user_data.get("admin_prod_key"):
         return
 
     text = update.message.text
     user_id = update.effective_user.id
 
-    # 🔥 HANDLE PAYER NAME
+    # HANDLE PAYER NAME
     if context.user_data.get("awaiting") == "payer_name":
         context.user_data["payer_name"] = text
         context.user_data["awaiting"] = "screenshot"
-
         await update.message.reply_text("📸 Now send payment screenshot.")
         return
 
-    # 🔥 HANDLE SCREENSHOT STEP (text fallback safety)
+    # HANDLE SCREENSHOT STEP (text fallback safety)
     if context.user_data.get("awaiting") == "screenshot":
         await update.message.reply_text("❌ Please send a photo, not text.")
         return
@@ -366,8 +365,6 @@ async def paid_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     order_id = query.data.split(":")[1]
-
-    # 🔥 SAVE STATE
     context.user_data["paid_order_id"] = order_id
     context.user_data["awaiting"] = "payer_name"
 
@@ -394,7 +391,7 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         photo = update.message.photo[-1]
 
-        # ✅ SAVE TO DB
+        # Save to DB
         supabase.table("orders") \
             .update({
                 "payer_name": payer_name,
@@ -405,7 +402,7 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         await update.message.reply_text("⏳ Payment sent to admin for verification.")
 
-        # ✅ GET ORDER
+        # Get order
         order = supabase.table("orders") \
             .select("*") \
             .eq("order_id", order_id) \
@@ -414,7 +411,7 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         prod = PRODUCTS.get(order.data["product_key"], {}).get("display", "Unknown")
 
-        # ✅ SEND TO ADMIN
+        # Send to admin
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Accept", callback_data=f"admin_accept:{order_id}"),
@@ -436,11 +433,11 @@ async def screenshot_received(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=keyboard
         )
 
-        # 🔥 CLEAR SESSION
+        # Clear session
         context.user_data.clear()
 
     except Exception as e:
-        print("SCREENSHOT ERROR:", e)
+        logger.error(f"Screenshot error: {e}")
         await update.message.reply_text("❌ Error processing payment.")
         
 # ========== Admin Actions ==========
@@ -469,14 +466,13 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quantity = order.data["quantity"]
         user_id = order.data["user_id"]
 
-        # ✅ CHECK STOCK
+        # Check stock
         stock = await get_stock(product_key)
-
         if stock < quantity:
             await query.edit_message_caption("❌ Not enough stock.")
             return
 
-        # ✅ GET CODES
+        # Get codes
         codes_res = supabase.table("coupon_codes") \
             .select("id, code") \
             .eq("product_key", product_key) \
@@ -491,21 +487,20 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         codes = [c["code"] for c in codes_res.data]
         ids = [c["id"] for c in codes_res.data]
 
-        # ✅ MARK USED
+        # Mark used
         supabase.table("coupon_codes") \
             .update({"is_used": True, "order_id": order_id}) \
             .in_("id", ids) \
             .execute()
 
-        # ✅ SEND TO USER
+        # Send to user
         codes_text = "\n".join(codes)
-
         await context.bot.send_message(
             chat_id=user_id,
             text=f"✅ Payment Approved!\n\nYour Codes:\n{codes_text}"
         )
 
-        # ✅ UPDATE ORDER
+        # Update order
         supabase.table("orders") \
             .update({"status": "completed"}) \
             .eq("order_id", order_id) \
@@ -514,7 +509,7 @@ async def admin_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(f"✅ Order {order_id} approved")
 
     except Exception as e:
-        print("ACCEPT ERROR:", e)
+        logger.error(f"Accept error: {e}")
         await query.edit_message_caption("❌ Error while approving order.")
 
 async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -531,7 +526,7 @@ async def admin_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await query.edit_message_caption(f"❌ Order {order_id} declined.")
 
-# ========== Admin Panel Handlers (Fixed) ==========
+# ========== Admin Panel Handlers ==========
 async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -552,7 +547,6 @@ async def admin_add_coupon_start(update: Update, context: ContextTypes.DEFAULT_T
 async def admin_add_coupon_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    logger.info(f"Admin add coupon product callback: {query.data}")
     prod_key = query.data.replace("add_coupon_prod_", "")
     context.user_data["admin_prod_key"] = prod_key
     await query.edit_message_text(
@@ -577,7 +571,6 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
             return ADMIN_ADD_COUPON_CODES
 
         inserted = 0
-
         for code in codes:
             try:
                 supabase.table("coupon_codes").insert({
@@ -587,14 +580,13 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
                 }).execute()
                 inserted += 1
             except Exception as e:
-                print("Insert error:", e)
+                logger.error(f"Insert error: {e}")
 
         await update.message.reply_text(f"✅ Added {inserted} coupon(s).")
-
         return ConversationHandler.END
 
     except Exception as e:
-        print("CRASH ERROR:", e)
+        logger.error(f"Add coupon error: {e}")
         await update.message.reply_text("❌ Error occurred. Try again.")
         return ConversationHandler.END
 
@@ -629,18 +621,8 @@ async def admin_remove_coupon_product(update: Update, context: ContextTypes.DEFA
 
 async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        print("=== REMOVE DEBUG START ===")
-
-        if not update.message:
-            print("No message object")
-            return
-
         text = update.message.text
-        print("INPUT:", text)
-
         prod_key = context.user_data.get("admin_prod_key")
-        print("PROD_KEY:", prod_key)
-
         if not prod_key:
             await update.message.reply_text("❌ Session expired. Start again.")
             return ConversationHandler.END
@@ -650,11 +632,7 @@ async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAU
             return ADMIN_REMOVE_COUPON_NUMBER
 
         num = int(text.strip())
-        print("NUM:", num)
-
         stock = await get_stock(prod_key)
-        print("STOCK:", stock)
-
         if num > stock:
             await update.message.reply_text(f"❌ Only {stock} available.")
             return ADMIN_REMOVE_COUPON_NUMBER
@@ -666,27 +644,19 @@ async def admin_remove_coupon_number(update: Update, context: ContextTypes.DEFAU
             .limit(num) \
             .execute()
 
-        print("CODES_RES:", codes_res.data)
-
         if not codes_res.data:
             await update.message.reply_text("❌ No coupons found.")
             return ConversationHandler.END
 
         ids = [c["id"] for c in codes_res.data]
-        print("IDS:", ids)
-
         supabase.table("coupon_codes").delete().in_("id", ids).execute()
 
         await update.message.reply_text(f"✅ Removed {len(ids)} coupon(s).")
-
         context.user_data.pop("admin_prod_key", None)
-
-        print("=== REMOVE SUCCESS ===")
-
         return ConversationHandler.END
 
     except Exception as e:
-        print("🔥 REMOVE ERROR:", e)
+        logger.error(f"Remove error: {e}")
         await update.message.reply_text("❌ Internal error. Try again.")
 
 async def admin_change_price_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -772,125 +742,80 @@ def main():
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # ===== CONVERSATIONS =====
-    conv_buy = ConversationHandler(
+    # Conversation handlers
+    buy_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_callback, pattern="^buy:")],
-        states={
-            AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)]
-        },
+        states={AWAITING_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_received)]},
         fallbacks=[CommandHandler("start", start)],
-        allow_reentry=True,
-        block=False
-    )
-
-    conv_paid = ConversationHandler(
-        entry_points=[],   # 🔥 empty
-        states={
-            AWAITING_PAYER_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, payer_name_received)
-            ],
-            AWAITING_SCREENSHOT: [
-                MessageHandler(filters.PHOTO, screenshot_received)
-            ],
-        },
-        fallbacks=[CommandHandler("start", start)],
-        per_message=True,
-        per_chat=True,
-        per_user=True,
         allow_reentry=True,
     )
 
-    conv_add = ConversationHandler(
+    add_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_coupon_start, pattern="^admin_add_coupon$")],
         states={
-            ADMIN_ADD_COUPON_PRODUCT: [
-                CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_")
-            ],
-            ADMIN_ADD_COUPON_CODES: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)
-            ],
+            ADMIN_ADD_COUPON_PRODUCT: [CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_")],
+            ADMIN_ADD_COUPON_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_coupon_codes)],
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True,
-        block=False
     )
 
-    conv_remove = ConversationHandler(
+    remove_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_remove_coupon_start, pattern="^admin_remove_coupon$")],
         states={
-            ADMIN_REMOVE_COUPON_PRODUCT: [
-                CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_")
-            ],
-            ADMIN_REMOVE_COUPON_NUMBER: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)
-            ],
+            ADMIN_REMOVE_COUPON_PRODUCT: [CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_")],
+            ADMIN_REMOVE_COUPON_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_coupon_number)],
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True,
-        block=False
     )
 
-    conv_price = ConversationHandler(
+    price_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_change_price_start, pattern="^admin_change_price$")],
         states={
-            ADMIN_CHANGE_PRICE_PRODUCT: [
-                CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_")
-            ],
-            ADMIN_CHANGE_PRICE_VALUE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)
-            ],
+            ADMIN_CHANGE_PRICE_PRODUCT: [CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_")],
+            ADMIN_CHANGE_PRICE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_change_price_value)],
         },
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True,
-        block=False
     )
 
-    conv_broadcast = ConversationHandler(
+    broadcast_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
-        states={
-            ADMIN_BROADCAST_MESSAGE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)
-            ]
-        },
+        states={ADMIN_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)]},
         fallbacks=[CommandHandler("start", start)],
         allow_reentry=True,
-        block=False
     )
 
-    # ===== HANDLERS ORDER (CRITICAL FIX) =====0
-def main():
-    application = Application.builder().token(BOT_TOKEN).build()
-    
+    # Add all handlers (order matters)
     application.add_handler(CommandHandler("start", start))
-
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
-    application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
-
-    # CALLBACKS
-    application.add_handler(CallbackQueryHandler(admin_add_coupon_product, pattern="^add_coupon_prod_"))
-    application.add_handler(CallbackQueryHandler(admin_remove_coupon_product, pattern="^remove_coupon_prod_"))
-    application.add_handler(CallbackQueryHandler(admin_change_price_product, pattern="^chprice_prod_"))
-
     application.add_handler(CallbackQueryHandler(admin_accept, pattern="^admin_accept:"))
     application.add_handler(CallbackQueryHandler(admin_decline, pattern="^admin_decline:"))
     application.add_handler(CallbackQueryHandler(admin_update_qr, pattern="^admin_update_qr$"))
     application.add_handler(CallbackQueryHandler(admin_last10, pattern="^admin_last10$"))
-
     application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
 
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+    # Conversation handlers
+    application.add_handler(buy_handler)
+    application.add_handler(add_handler)
+    application.add_handler(remove_handler)
+    application.add_handler(price_handler)
+    application.add_handler(broadcast_handler)
 
-    # 🔥 WEBHOOK (PORT SETUP)
+    # Generic handlers (must be last)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+    application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
+
+    # Webhook setup
     port = int(os.environ.get("PORT", 10000))
     webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
-
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=BOT_TOKEN,
         webhook_url=f"{webhook_url}/{BOT_TOKEN}"
     )
-
 
 if __name__ == "__main__":
     main()
