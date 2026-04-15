@@ -582,11 +582,16 @@ async def admin_add_coupon_codes(update: Update, context: ContextTypes.DEFAULT_T
             except Exception as e:
                 logger.error(f"Insert error: {e}")
 
+        # ✅ CRITICAL FIX: Remove the key so menu works again
+        context.user_data.pop("admin_prod_key", None)
+
         await update.message.reply_text(f"✅ Added {inserted} coupon(s).")
         return ConversationHandler.END
 
     except Exception as e:
         logger.error(f"Add coupon error: {e}")
+        # Also clean up on error
+        context.user_data.pop("admin_prod_key", None)
         await update.message.reply_text("❌ Error occurred. Try again.")
         return ConversationHandler.END
 
