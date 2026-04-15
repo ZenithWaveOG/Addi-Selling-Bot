@@ -711,6 +711,9 @@ async def admin_update_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_photo_qr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
+    # If user is in the middle of a payment flow, ignore QR update
+    if context.user_data.get("awaiting") == "screenshot":
+        return
     photo = update.message.photo[-1]
     await update_payment_qr(photo.file_id)
     await update.message.reply_text("✅ Payment QR code updated successfully!")
@@ -785,7 +788,7 @@ def main():
         allow_reentry=True,
     )
 
-    # Add handlers (order matters)
+    # ===== ORDER OF HANDLERS (CRITICAL) =====
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(CallbackQueryHandler(paid_callback, pattern="^paid:"))
@@ -793,7 +796,6 @@ def main():
     application.add_handler(CallbackQueryHandler(admin_decline, pattern="^admin_decline:"))
     application.add_handler(CallbackQueryHandler(admin_update_qr, pattern="^admin_update_qr$"))
     application.add_handler(CallbackQueryHandler(admin_last10, pattern="^admin_last10$"))
-    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
 
     # Conversation handlers
     application.add_handler(buy_handler)
@@ -802,11 +804,16 @@ def main():
     application.add_handler(price_handler)
     application.add_handler(broadcast_handler)
 
-    # Generic handlers (must be last)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+    # 🔥 Photo handler for payment screenshots MUST come before admin QR handler
     application.add_handler(MessageHandler(filters.PHOTO, screenshot_received))
 
-    # Webhook setup
+    # Admin QR update handler (only if not in payment flow)
+    application.add_handler(MessageHandler(filters.PHOTO & filters.User(ADMIN_ID), admin_photo_qr))
+
+    # Generic text menu handler (must be last)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
+
+    # Webhook setup for Render
     port = int(os.environ.get("PORT", 10000))
     webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
     application.run_webhook(
